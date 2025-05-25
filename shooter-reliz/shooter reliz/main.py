@@ -8,15 +8,20 @@ WIDTH, HEIGHT = 800, 600
 FPS = 60
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
+RED = (200, 0, 0)
+GREEN = (0, 180, 0)
+BLUE = (0, 150, 255)
+GRAY = (120, 120, 120)
+DARK_GRAY = (40, 40, 40)
 
-# Ініціалізація
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Гра-Стрілялка")
 clock = pygame.time.Clock()
-font = pygame.font.SysFont("Arial", 24)
 
-# Завантаження зображень
+font = pygame.font.SysFont("Arial", 24)
+big_font = pygame.font.SysFont("Arial", 40)
+
 def load_image(name, size=None):
     if not os.path.exists(name):
         print(f"❌ Файл не знайдено: {name}")
@@ -27,6 +32,7 @@ def load_image(name, size=None):
         img = pygame.transform.scale(img, size)
     return img
 
+# Зображення
 background_img = load_image("shooter reliz/assets/fon.jpg", (WIDTH, HEIGHT))
 player_img = load_image("shooter reliz/assets/tank.png", (60, 60))
 enemy_img = load_image("shooter reliz/assets/enemy.jpg", (40, 40))
@@ -35,11 +41,69 @@ bullet_img = load_image("shooter reliz/assets/kvitka.png", (10, 20))
 bonus_heart_img = load_image("shooter reliz/assets/hart.jpg", (30, 30))
 bonus_fire_img = load_image("shooter reliz/assets/fire.jpg", (30, 30))
 
-menu_button_rect = pygame.Rect(WIDTH - 130, 10, 120, 40)
-button_easy_rect = pygame.Rect(WIDTH // 2 - 170, HEIGHT // 2 + 50, 180, 60)
-button_hard_rect = pygame.Rect(WIDTH // 2 + 10, HEIGHT // 2 + 50, 180, 60)
+# Прямокутники кнопок меню
+button_easy_rect = pygame.Rect(WIDTH // 2 - 170, HEIGHT // 2, 180, 60)
+button_hard_rect = pygame.Rect(WIDTH // 2 + 10, HEIGHT // 2, 180, 60)
+button_settings_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2 + 90, 160, 50)
+button_quit_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2 + 160, 160, 50)
 
-# --- Функції ---
+menu_button_rect = pygame.Rect(WIDTH - 130, 10, 120, 40)
+
+# Налаштування звуку (поки без звуку, для прикладу)
+volume = 0.5
+
+# Керування
+control_scheme = "AD"  # варіанти: "AD", "ARROWS"
+
+# Складність
+difficulty = None  # "easy" або "hard"
+
+# Ігрові змінні і константи
+WIN_WAVE = 5
+shoot_cooldown = 500
+
+# --- Ігрові об'єкти ---
+player = pygame.Rect(WIDTH // 2, HEIGHT - 70, 60, 60)
+enemy_types = [
+    {"img": enemy_img, "hp": 1},
+    {"img": enemy_tank_img, "hp": 2}
+]
+
+def reset_game():
+    global bullets, enemies, bonus_list
+    global score, lives, wave, kills, spawn_timer, fire_mode, fire_mode_end_time, last_shot
+    player.x = WIDTH // 2
+    player.y = HEIGHT - 70
+    bullets = []
+    enemies = []
+    bonus_list = []
+    score = 0
+    lives = 5
+    wave = 1
+    kills = 0
+    spawn_timer = 0
+    fire_mode = False
+    fire_mode_end_time = 0
+    last_shot = 0
+
+reset_game()
+
+game_state = "menu"
+paused = False
+high_score = 0
+
+# --- Допоміжні функції ---
+
+def draw_text_center(text, y, font_, color=WHITE):
+    surf = font_.render(text, True, color)
+    screen.blit(surf, (WIDTH // 2 - surf.get_width() // 2, y))
+
+def draw_button(rect, text, color_bg, color_text=BLACK):
+    pygame.draw.rect(screen, color_bg, rect)
+    text_surf = font.render(text, True, color_text)
+    screen.blit(text_surf, (rect.x + (rect.width - text_surf.get_width()) // 2,
+                            rect.y + (rect.height - text_surf.get_height()) // 2))
+
 def spawn_enemy():
     etype = random.choice(enemy_types)
     width = etype["img"].get_width()
@@ -58,13 +122,14 @@ def draw_health_bar(x, y, lives):
     max_lives = 5
     width = 100
     pygame.draw.rect(screen, (255, 0, 0), (x, y, width, 10))
-    pygame.draw.rect(screen, (0, 255, 0), (x, y, width * lives / max_lives, 10))
+    pygame.draw.rect(screen, (0, 255, 0), (x, y, width * min(lives, max_lives) / max_lives, 10))
 
 def draw_ui():
     screen.blit(font.render(f"Рахунок: {score}", True, WHITE), (10, 10))
     draw_health_bar(10, 40, lives)
     screen.blit(font.render(f"Хвиля: {wave}", True, (100, 255, 255)), (10, 60))
     screen.blit(font.render(f"Рекорд: {high_score}", True, WHITE), (10, 90))
+    pygame.draw.rect(screen, RED, menu_button_rect)
     screen.blit(font.render("Меню", True, WHITE), (menu_button_rect.x + 25, menu_button_rect.y + 10))
 
 def bullet_hit(enemy):
@@ -76,47 +141,20 @@ def bullet_hit(enemy):
         kills += 1
         spawn_bonus(enemy["rect"].x, enemy["rect"].y)
 
-def reset_game():
-    global bullets, enemies, bonus_list
-    global score, lives, wave, kills, spawn_timer, shoot_cooldown, fire_mode
-    player.x = WIDTH // 2
-    player.y = HEIGHT - 70
-    bullets = []
-    enemies = []
-    bonus_list = []
-    score = 0
-    lives = 5
-    wave = 1
-    kills = 0
-    spawn_timer = 0
-    fire_mode = False
+# --- Головний цикл ---
 
-player = pygame.Rect(WIDTH // 2, HEIGHT - 70, 60, 60)
-enemy_types = [
-    {"img": enemy_img, "hp": 1},
-    {"img": enemy_tank_img, "hp": 2}
-]
-
-fire_mode = False
-reset_game()
-game_state = "menu"
-high_score = 0
-WIN_WAVE = 5
-shoot_cooldown = 500
-last_shot = pygame.time.get_ticks()
-difficulty = None
-
-running = True
-while running:
+while True:
     dt = clock.tick(FPS)
     screen.blit(background_img, (0, 0))
+    keys = pygame.key.get_pressed()
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
+            pygame.quit()
+            sys.exit()
 
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if game_state == "menu" or game_state in ["win", "lose"]:
+            if game_state == "menu":
                 if button_easy_rect.collidepoint(event.pos):
                     difficulty = "easy"
                     shoot_cooldown = 500
@@ -129,104 +167,181 @@ while running:
                     WIN_WAVE = 6
                     reset_game()
                     game_state = "play"
-            elif game_state == "play" and menu_button_rect.collidepoint(event.pos):
-                game_state = "menu"
+                elif button_settings_rect.collidepoint(event.pos):
+                    game_state = "settings"
+                elif button_quit_rect.collidepoint(event.pos):
+                    pygame.quit()
+                    sys.exit()
+            elif game_state == "settings":
+                mx, my = event.pos
+                if control_ad_rect.collidepoint(mx, my):
+                    control_scheme = "AD"
+                if control_arrows_rect.collidepoint(mx, my):
+                    control_scheme = "ARROWS"
+                if vol_up_rect.collidepoint(mx, my):
+                    volume = min(volume + 0.1, 1.0)
+                if vol_down_rect.collidepoint(mx, my):
+                    volume = max(volume - 0.1, 0.0)
+                if settings_back_rect.collidepoint(mx, my):
+                    game_state = "menu"
 
-        if event.type == pygame.USEREVENT + 1:
-            fire_mode = False
-            pygame.time.set_timer(pygame.USEREVENT + 1, 0)
+            elif game_state == "play":
+                if menu_button_rect.collidepoint(event.pos):
+                    game_state = "menu"
+                    paused = False
 
-    keys = pygame.key.get_pressed()
-    if game_state == "menu" or game_state in ["win", "lose"]:
-        pygame.draw.rect(screen, (200, 255, 200), button_easy_rect)
-        pygame.draw.rect(screen, (255, 200, 200), button_hard_rect)
-        screen.blit(font.render("Легкий режим", True, BLACK), (button_easy_rect.x + 10, button_easy_rect.y + 15))
-        screen.blit(font.render("Важкий режим", True, BLACK), (button_hard_rect.x + 10, button_hard_rect.y + 15))
-        if game_state in ["win", "lose"]:
-            message = "ТИ ВИГРАВ!" if game_state == "win" else "ТИ ПРОГРАВ!"
-            msg_surface = font.render(message, True, WHITE)
-            screen.blit(msg_surface, (WIDTH // 2 - msg_surface.get_width() // 2, HEIGHT // 2 - 80))
-            hs_surface = font.render(f"Рекорд: {high_score}", True, WHITE)
-            screen.blit(hs_surface, (WIDTH // 2 - hs_surface.get_width() // 2, HEIGHT // 2 - 40))
+        if event.type == pygame.KEYDOWN:
+            if game_state == "play":
+                if event.key == pygame.K_p:
+                    paused = not paused
+                if event.key == pygame.K_ESCAPE:
+                    game_state = "menu"
+                    paused = False
+            elif game_state == "settings":
+                if event.key == pygame.K_ESCAPE:
+                    game_state = "menu"
+
+    if game_state == "menu":
+        draw_text_center("Вітання у грі!", HEIGHT // 2 - 150, big_font, BLUE)
+        draw_button(button_easy_rect, "Легкий режим", GREEN)
+        draw_button(button_hard_rect, "Важкий режим", RED)
+        draw_button(button_settings_rect, "Налаштування", GRAY)
+        draw_button(button_quit_rect, "Вийти", DARK_GRAY)
+        hs_surf = font.render(f"Рекорд: {high_score}", True, WHITE)
+        screen.blit(hs_surf, (10, HEIGHT - 40))
+
+    elif game_state == "settings":
+        draw_text_center("Налаштування", HEIGHT // 2 - 140, big_font, BLUE)
+
+        # Прямокутники кнопок для налаштувань
+        control_ad_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 - 60, 120, 40)
+        control_arrows_rect = pygame.Rect(WIDTH // 2 + 30, HEIGHT // 2 - 60, 120, 40)
+        vol_down_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2 + 10, 40, 40)
+        vol_up_rect = pygame.Rect(WIDTH // 2 + 30, HEIGHT // 2 + 10, 40, 40)
+        settings_back_rect = pygame.Rect(WIDTH // 2 - 80, HEIGHT // 2 + 90, 160, 50)
+
+        # Керування
+        draw_text_center("Керування:", HEIGHT // 2 - 100, font, BLACK)
+        draw_button(control_ad_rect, "Клавіші A/D", GREEN if control_scheme == "AD" else GRAY)
+        draw_button(control_arrows_rect, "Стрілки", GREEN if control_scheme == "ARROWS" else GRAY)
+
+        # Гучність
+        draw_text_center("Гучність:", HEIGHT // 2 - 20, font, BLACK)
+    
+        pygame.draw.rect(screen, GRAY, vol_down_rect)
+        pygame.draw.rect(screen, GRAY, vol_up_rect)
+        minus_surf = font.render("-", True, BLACK)
+        plus_surf = font.render("+", True, BLACK)
+        screen.blit(minus_surf, (vol_down_rect.x + 12, vol_down_rect.y + 5))
+        screen.blit(plus_surf, (vol_up_rect.x + 10, vol_up_rect.y + 5))
+        vol_text = font.render(f"{int(volume * 100)}%", True, BLACK)
+        screen.blit(vol_text, (WIDTH // 2 - vol_text.get_width() // 2, HEIGHT // 2 + 15))
+
+        # Кнопка назад
+        draw_button(settings_back_rect, "Назад", DARK_GRAY, WHITE)
+
     elif game_state == "play":
-        if keys[pygame.K_a] and player.left > 0:
-            player.x -= 5
-        if keys[pygame.K_d] and player.right < WIDTH:
-            player.x += 5
-        if keys[pygame.K_SPACE]:
+        if paused:
+            draw_text_center("Пауза - натисніть P щоб продовжити", HEIGHT // 2, big_font, WHITE)
+        else:
+            # Рух гравця
+            speed = 5
+            if control_scheme == "AD":
+                if keys[pygame.K_a] and player.left > 0:
+                    player.x -= speed
+                if keys[pygame.K_d] and player.right < WIDTH:
+                    player.x += speed
+            else:  # ARROWS
+                if keys[pygame.K_LEFT] and player.left > 0:
+                    player.x -= speed
+                if keys[pygame.K_RIGHT] and player.right < WIDTH:
+                    player.x += speed
+
+            # Стрільба
             now = pygame.time.get_ticks()
-            if now - last_shot > shoot_cooldown:
-                if fire_mode:
-                    bullets.append(pygame.Rect(player.centerx - 20, player.top - 20, 10, 20))
-                    bullets.append(pygame.Rect(player.centerx + 10, player.top - 20, 10, 20))
-                else:
-                    bullets.append(pygame.Rect(player.centerx - 5, player.top - 20, 10, 20))
+            if keys[pygame.K_SPACE] and now - last_shot > shoot_cooldown:
                 last_shot = now
+                if fire_mode:
+                    # подвійний постріл
+                    bullets.append(pygame.Rect(player.centerx - 20, player.top, 10, 20))
+                    bullets.append(pygame.Rect(player.centerx + 10, player.top, 10, 20))
+                else:
+                    bullets.append(pygame.Rect(player.centerx - 5, player.top, 10, 20))
 
-        for bullet in bullets[:]:
-            bullet.y -= 10
-            if bullet.bottom < 0:
-                bullets.remove(bullet)
+            # Оновлення пострілів
+            for bullet in bullets[:]:
+                bullet.y -= 10
+                if bullet.bottom < 0:
+                    bullets.remove(bullet)
 
-        spawn_timer += 1
-        if spawn_timer > 60:
-            spawn_enemy()
-            spawn_timer = 0
+            # Спавн ворогів
+            spawn_timer += dt
+            spawn_interval = 1500 if difficulty == "easy" else 1000
+            if spawn_timer > spawn_interval:
+                spawn_enemy()
+                spawn_timer = 0
 
-        for enemy in enemies[:]:
-            speed = 1.5 + 0.1 * wave
-            enemy["rect"].y += speed
-            if player.colliderect(enemy["rect"]):
-                enemies.remove(enemy)
-                lives -= 1
-                if lives <= 0:
-                    game_state = "lose"
-                    high_score = max(high_score, score)
-            elif enemy["rect"].top > HEIGHT:
-                enemies.remove(enemy)
-                lives -= 1
-                if lives <= 0:
-                    game_state = "lose"
-                    high_score = max(high_score, score)
-
-        for bullet in bullets[:]:
+            # Оновлення ворогів
             for enemy in enemies[:]:
-                if bullet.colliderect(enemy["rect"]):
-                    bullet_hit(enemy)
-                    if bullet in bullets:
+                enemy["rect"].y += 2 if difficulty == "easy" else 3
+                if enemy["rect"].top > HEIGHT:
+                    enemies.remove(enemy)
+                    lives -= 1
+                    if lives <= 0:
+                        game_state = "menu"
+                        if score > high_score:
+                            high_score = score
+                # Перевірка попадання в гравця
+                if enemy["rect"].colliderect(player):
+                    enemies.remove(enemy)
+                    lives -= 1
+                    if lives <= 0:
+                        game_state = "menu"
+                        if score > high_score:
+                            high_score = score
+
+            # Перевірка попадання пострілів у ворогів
+            for bullet in bullets[:]:
+                for enemy in enemies[:]:
+                    if bullet.colliderect(enemy["rect"]):
                         bullets.remove(bullet)
-                    break
+                        bullet_hit(enemy)
+                        break
 
-        for bonus in bonus_list[:]:
-            bonus["rect"].y += 2
-            if bonus["rect"].top > HEIGHT:
-                bonus_list.remove(bonus)
-            elif player.colliderect(bonus["rect"]):
-                if bonus["type"] == "heart":
-                    lives += 1
-                elif bonus["type"] == "fire":
-                    fire_mode = True
-                    pygame.time.set_timer(pygame.USEREVENT + 1, 5000)
-                bonus_list.remove(bonus)
+            # Оновлення бонусів
+            for bonus in bonus_list[:]:
+                bonus["rect"].y += 2
+                if bonus["rect"].top > HEIGHT:
+                    bonus_list.remove(bonus)
+                    continue
+                if bonus["rect"].colliderect(player):
+                    if bonus["type"] == "heart":
+                        lives = min(lives + 1, 5)
+                    elif bonus["type"] == "fire":
+                        fire_mode = True
+                        fire_mode_end_time = pygame.time.get_ticks() + 5000
+                    bonus_list.remove(bonus)
 
-        if kills >= wave * 20:
-            wave += 1
-            if wave == WIN_WAVE:
-                enemies.append({"rect": pygame.Rect(WIDTH // 2 - 50, -100, 100, 100), "img": enemy_tank_img, "hp": 10})
-            elif wave > WIN_WAVE:
-                game_state = "win"
-                high_score = max(high_score, score)
+            # Відключення подвійного вогню
+            if fire_mode and pygame.time.get_ticks() > fire_mode_end_time:
+                fire_mode = False
 
-        screen.blit(player_img, player)
-        for bullet in bullets:
-            screen.blit(bullet_img, bullet)
-        for enemy in enemies:
-            screen.blit(enemy["img"], enemy["rect"])
-        for bonus in bonus_list:
-            screen.blit(bonus["img"], bonus["rect"])
-        draw_ui()
+            # Малюємо гравця
+            screen.blit(player_img, player.topleft)
+
+            # Малюємо ворогів
+            for enemy in enemies:
+                screen.blit(enemy["img"], enemy["rect"].topleft)
+
+            # Малюємо постріли
+            for bullet in bullets:
+                screen.blit(bullet_img, bullet.topleft)
+
+            # Малюємо бонуси
+            for bonus in bonus_list:
+                screen.blit(bonus["img"], bonus["rect"].topleft)
+
+            # Малюємо UI
+            draw_ui()
 
     pygame.display.flip()
-
-pygame.quit()
-sys.exit()
